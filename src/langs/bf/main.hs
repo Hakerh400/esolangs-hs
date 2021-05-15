@@ -70,7 +70,8 @@ parseProg src = let
 --            the rest of the source code
 -- Given a non-empty part of the source code, try to
 -- parse an instruction. In case the first character
--- is not one of the 8 instruction characters, skip it
+-- is not one of the 8 instruction characters, return
+-- nothing
 parseInst :: String -> (Maybe Instruction, String)
 parseInst (ch:chs) = case ch of
   '<' -> (Just MoveLeft, chs)
@@ -113,11 +114,11 @@ runInst ctx inst = let
     MoveLeft -> Context (ls, (l : mr)) inp out
     MoveRight -> Context ((r : ml), rs) inp out
     Increment -> Context (ml, ((r + 1) .&. 255 : rs)) inp out
-    Decrement -> Context (ml, ((r + 255) .&. 255 : rs)) inp out
+    Decrement -> Context (ml, ((r - 1) .&. 255 : rs)) inp out
     Input -> let
       (b, bs) = readByte inp
       in Context (ml, (b : rs)) bs out
-    Output -> Context (ml, (r : rs)) inp (out ++ [chr r])
+    Output -> Context (ml, mr) inp (out ++ [chr r])
     Loop insts -> case r of
       0 -> ctx
       _ -> let
