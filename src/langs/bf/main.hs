@@ -2,8 +2,13 @@ module Src.Langs.Bf.Main (main) where
 
 import Data.Char
 import Data.Bits
+import Control.Monad.State
+import Data.Functor.Identity
 
 import Src.Util.Main
+
+instance MonadFail Identity where
+  fail = error
 
 type Program = [Instruction]
 
@@ -25,17 +30,19 @@ instance Show Instruction where
   show Output = "."
   show (Loop insts) = "[" ++ showProg insts ++ "]"
 
-data Context = Context {
+data Machine = Machine {
   mem_ :: ([Int], [Int]),
   inp_ :: String,
   out_ :: String}
 
+type Context = State Machine
+
 main :: String -> String -> String
 main src input = let
   prog = parse src
-  ctxInitial = initCtx input
-  ctxFinal = run ctxInitial prog
-  output = out_ ctxFinal
+  machineInitial = initMachine input
+  machineFinal = execState (runProg prog) machineInitial
+  output = out_ machineFinal
   in output
 
 parse :: String -> Program
@@ -69,35 +76,32 @@ parseInst (ch:chs) = case ch of
       _ -> error "Missing closed bracket"
   _ -> (Nothing, chs)
 
-initCtx :: String -> Context
-initCtx inp = Context {
+initMachine :: String -> Machine
+initMachine inp = Machine {
   mem_ = (repeat 0, repeat 0),
   inp_ = inp,
   out_ = ""}
 
-run :: Context -> Program -> Context
-run ctx [] = ctx
-run ctx (inst:insts) = let
-  ctx' = runInst ctx inst
-  in run ctx' insts
+runProg :: Program -> Context ()
+runProg = mapM_ runInst
 
-runInst :: Context -> Instruction -> Context
-runInst ctx inst = let
-  (Context (ml@(l:ls), mr@(r:rs)) inp out) = ctx
-  in case inst of
-    MoveLeft -> Context (ls, (l : mr)) inp out
-    MoveRight -> Context ((r : ml), rs) inp out
-    Increment -> Context (ml, ((r + 1) .&. 255 : rs)) inp out
-    Decrement -> Context (ml, ((r - 1) .&. 255 : rs)) inp out
-    Input -> let
-      (b, bs) = readByte inp
-      in Context (ml, (b : rs)) bs out
-    Output -> Context (ml, mr) inp (out ++ [chr r])
-    Loop insts -> case r of
-      0 -> ctx
-      _ -> let
-        ctx' = run ctx insts
-        in runInst ctx' inst
+runInst :: Instruction -> Context ()
+runInst inst = do
+  (Machine (ml@(l:ls), mr@(r:rs)) inp out) <- get
+  case inst of
+    MoveLeft -> put $ Machine (ls, (l : mr)) inp out
+    MoveRight -> put $ Machine ((r : ml), rs) inp out
+    Increment -> put $ Machine (ml, ((r + 1) .&. 255 : rs)) inp out
+    Decrement -> put $ Machine (ml, ((r - 1) .&. 255 : rs)) inp out
+    Input -> do
+      let (b, bs) = readByte inp
+      put $ Machine (ml, (b : rs)) bs out
+    Output -> put $ Machine (ml, mr) inp (out ++ [chr r])
+    Loop insts -> if r == 0 then
+      return ()
+      else do
+        runProg insts
+        runInst inst
 
 readByte :: String -> (Int, String)
 readByte [] = (0, [])
