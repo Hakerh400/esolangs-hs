@@ -2,8 +2,8 @@ module Src.Langs.Bf.Main (main) where
 
 import Data.Char
 import Data.Bits
-import Control.Monad.State
 import Data.Functor.Identity
+import Control.Monad.State
 
 import Src.Util.Main
 
@@ -30,19 +30,20 @@ instance Show Instruction where
   show Output = "."
   show (Loop insts) = "[" ++ showProg insts ++ "]"
 
-data Machine = Machine {
-  mem_ :: ([Int], [Int]),
-  inp_ :: String,
-  out_ :: String}
+type Pair a = (a, a)
 
-type Context = State Machine
+data MachineT = MachineT
+  (Pair [Int])
+  (Pair String)
+
+type Machine = State MachineT
 
 main :: String -> String -> String
 main src input = let
   prog = parse src
   machineInitial = initMachine input
   machineFinal = execState (runProg prog) machineInitial
-  output = out_ machineFinal
+  output = extractOutput machineFinal
   in output
 
 parse :: String -> Program
@@ -76,39 +77,145 @@ parseInst (ch:chs) = case ch of
       _ -> error "Missing closed bracket"
   _ -> (Nothing, chs)
 
-initMachine :: String -> Machine
-initMachine inp = Machine {
-  mem_ = (repeat 0, repeat 0),
-  inp_ = inp,
-  out_ = ""}
+initMachine :: String -> MachineT
+initMachine inp = MachineT
+  (repeat 0, repeat 0)
+  (inp, "")
 
-runProg :: Program -> Context ()
+runProg :: Program -> Machine ()
 runProg = mapM_ runInst
 
-runInst :: Instruction -> Context ()
-runInst inst = do
-  (Machine (ml@(l:ls), mr@(r:rs)) inp out) <- get
-  case inst of
-    MoveLeft -> put $ Machine (ls, (l : mr)) inp out
-    MoveRight -> put $ Machine ((r : ml), rs) inp out
-    Increment -> put $ Machine (ml, ((r + 1) .&. 255 : rs)) inp out
-    Decrement -> put $ Machine (ml, ((r - 1) .&. 255 : rs)) inp out
-    Input -> do
-      let (b, bs) = readByte inp
-      put $ Machine (ml, (b : rs)) bs out
-    Output -> put $ Machine (ml, mr) inp (out ++ [chr r])
-    Loop insts -> if r == 0 then
-      return ()
-      else do
-        runProg insts
-        runInst inst
+runInst :: Instruction -> Machine ()
+runInst inst = case inst of
+  MoveLeft -> moveLeft
+  MoveRight -> moveRight
+  Increment -> increment
+  Decrement -> decrement
+  Input -> inputByte
+  Output -> outputByte
+  Loop insts -> loop insts
 
-readByte :: String -> (Int, String)
-readByte [] = (0, [])
-readByte (c:cs) = (ord c, cs)
+moveLeft :: Machine ()
+moveLeft = do
+  (ml, b : mr) <- getMem
+  setMem (b : ml, mr)
+
+moveRight :: Machine ()
+moveRight = do
+  (b : ml, mr) <- getMem
+  setMem (ml, b : mr)
+
+increment :: Machine ()
+increment = do
+  b <- getByte
+  setByte (toByte $ b + 1)
+
+decrement :: Machine ()
+decrement = do
+  b <- getByte
+  setByte (toByte $ b - 1)
+
+inputByte :: Machine ()
+inputByte = do
+  b <- readFromInput
+  setByte b
+
+outputByte :: Machine ()
+outputByte = do
+  b <- getByte
+  writeToOutput b
+
+loop :: Program -> Machine ()
+loop insts = do
+  b <- getByte
+  if b /= 0
+    then do
+      runProg insts
+      loop insts
+    else return ()
+
+readFromInput :: Machine Int
+readFromInput = do
+  inp <- getInput
+  case inp of
+    [] -> return 0
+    (b : bs) -> do
+      setInput bs
+      return $ ord b 
+
+writeToOutput :: Int -> Machine ()
+writeToOutput b = do
+  out <- getOutput
+  setOutput (chr b : out)
+
+getInput :: Machine String
+getInput = do
+  io <- getIO
+  return $ fst io
+
+getOutput :: Machine String
+getOutput = do
+  io <- getIO
+  return $ snd io
+
+getIO :: Machine (Pair String)
+getIO = do
+  (MachineT _ io) <- get
+  return io
+
+setInput :: String -> Machine ()
+setInput inp = do
+  (_, out) <- getIO
+  setIO (inp, out)
+
+setOutput :: String -> Machine ()
+setOutput out = do
+  (inp, _) <- getIO
+  setIO (inp, out)
+
+setByte :: Int -> Machine ()
+setByte b = do
+  mr <- getMemr
+  setMemr (b : tail mr)
+
+getByte :: Machine Int
+getByte = do
+  mr <- getMemr
+  return $ head mr
+
+setMemr :: [Int] -> Machine ()
+setMemr mr = do
+  (ml, _) <- getMem
+  setMem (ml, mr)
+
+setMem :: (Pair [Int]) -> Machine ()
+setMem mem = do
+  (MachineT _ io) <- get
+  put (MachineT mem io)
+
+setIO :: Pair String -> Machine ()
+setIO io = do
+  (MachineT mem _) <- get
+  put (MachineT mem io)
+
+getMemr :: Machine [Int]
+getMemr = do
+  mem <- getMem
+  return $ snd mem
+
+getMem :: Machine (Pair [Int])
+getMem = do
+  (MachineT mem _) <- get
+  return mem
+
+extractOutput :: MachineT -> String
+extractOutput (MachineT _ (_, out)) = reverse out
 
 showProg :: Program -> String
 showProg = concatMap show
 
 maybe2list :: Maybe a -> [a]
 maybe2list = maybe [] (:[])
+
+toByte :: Int -> Int
+toByte = (.&. 255)
