@@ -1,7 +1,6 @@
 module Src.Langs.Bf.Main (main) where
 
 import Data.Char
-import Data.Bits
 import Data.Word
 import Data.Functor.Identity
 import Control.Monad.State
@@ -23,18 +22,6 @@ data Instruction =
   Loop Program
 
 type Parser = State String
-
--- instance Show Instruction where
---   show MoveLeft = "<"
---   show MoveRight = ">"
---   show Increment = "+"
---   show Decrement = "-"
---   show Input = ","
---   show Output = "."
---   show (Loop insts) = "[" ++ showProg insts ++ "]"
---
--- showProg :: Program -> String
--- showProg = concatMap show
 
 data MachineT = MachineT {
   meml :: [Word8],
